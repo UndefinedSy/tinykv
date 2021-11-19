@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -172,6 +173,7 @@ func TestRawGetAfterRawDelete1(t *testing.T) {
 	assert.Nil(t, err)
 
 	resp, err := server.RawGet(nil, get)
+	fmt.Printf("response: %v\n", resp.String())
 	assert.Nil(t, err)
 	assert.True(t, resp.NotFound)
 }

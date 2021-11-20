@@ -2,9 +2,7 @@ package server
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/Connor1996/badger"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 )
@@ -28,14 +26,13 @@ func (server *Server) RawGet(_ context.Context, req *kvrpcpb.RawGetRequest) (
 
 	val, err := reader.GetCF(req.Cf, req.Key)
 	if err != nil {
-		if err == badger.ErrKeyNotFound {
-			res.NotFound = true
-		}
-		res.Error = err.Error()
-		return res, nil
+		return nil, err
 	}
-	fmt.Printf("CHECKPOINT: [%v]\n", val)
+
 	res.Value = val
+	if res.Value == nil {
+		res.NotFound = true
+	}
 	// Your Code Here (1).
 	return res, nil
 }
@@ -111,7 +108,7 @@ func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*
 	iter := reader.IterCF(req.GetCf())
 	defer iter.Close()
 
-	for iter.Seek(req.GetStartKey()); iter.Valid(); iter.Next() {
+	for iter.Seek(req.GetStartKey()); iter.Valid() && req.Limit > 0; iter.Next() {
 		item := iter.Item()
 		key := item.Key()
 		val, err := item.Value()
@@ -119,11 +116,13 @@ func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*
 			res.Error = err.Error()
 			return res, err
 		}
+
 		kvPair := &kvrpcpb.KvPair{
 			Key:   key,
 			Value: val,
 		}
 		res.Kvs = append(res.Kvs, kvPair)
+		req.Limit--
 	}
 
 	// Your Code Here (1).

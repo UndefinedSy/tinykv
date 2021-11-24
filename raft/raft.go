@@ -237,12 +237,14 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	r.State = StateFollower
 	r.Lead = lead
 	r.electionElapsed = 0
+	r.Term = term
 	// Your Code Here (2A).
 }
 
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
+	r.Vote = r.id
 	r.State = StateCandidate
 	r.votes = make(map[uint64]bool)
 	r.Term++
@@ -256,7 +258,7 @@ func (r *Raft) becomeCandidate() {
 		}
 
 		msg.Index = r.RaftLog.LastIndex()
-		msg.Term, _ = r.RaftLog.Term(msg.Index)
+		msg.LogTerm, _ = r.RaftLog.Term(msg.Index)
 		r.msgs = append(r.msgs, msg)
 	}
 
@@ -330,8 +332,10 @@ func (r *Raft) Step(m pb.Message) error {
 			To:      m.From,
 		}
 
-		if (r.Vote == 0 || r.Vote == m.From) && r.checkCandidateUpToDate(m.Term, m.Index) {
+		if (r.Vote == 0 || r.Vote == m.From) &&
+			r.checkCandidateUpToDate(m.Term, m.Index) {
 			msg.Reject = false
+			r.Vote = m.From
 		} else {
 			msg.Reject = true
 		}
@@ -348,6 +352,11 @@ func (r *Raft) Step(m pb.Message) error {
 		r.handleHeartbeat(m)
 	case pb.MessageType_MsgHeartbeatResponse:
 		fmt.Printf("Received heartbeat response from raft peer[%d]\n", m.From)
+	case pb.MessageType_MsgAppend:
+		r.handleAppendEntries(m)
+	case pb.MessageType_MsgAppendResponse:
+		fmt.Printf("Received append response from raft peer[%d]\n", m.From)
+
 	}
 	// switch r.State {
 	// case StateFollower:
@@ -366,24 +375,23 @@ func (r *Raft) hasQuorumVotes() bool {
 			votesCount++
 		}
 	}
-	return votesCount > (len(r.Peers)+1)/2
+	return votesCount >= (len(r.Peers)+1)/2
 }
 
 // handleAppendEntries handle AppendEntries RPC request
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
+	if r.Lead != m.From {
+		r.becomeFollower(m.Term, m.From)
+	}
+
 	msg := pb.Message{
 		MsgType: pb.MessageType_MsgAppendResponse,
 		From:    r.id,
 		To:      m.From,
 	}
 
-	if m.Term < r.Term {
-		msg.Term = r.Term
-		msg.Reject = true
-		r.msgs = append(r.msgs, msg)
-	}
-
+	r.msgs = append(r.msgs, msg)
 	// Your Code Here (2A).
 }
 

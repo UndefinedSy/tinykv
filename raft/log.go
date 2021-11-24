@@ -50,6 +50,9 @@ type RaftLog struct {
 	pendingSnapshot *pb.Snapshot
 
 	// Your Data Here (2A).
+	prevLogIndex   uint64
+	lastEntryIndex uint64
+	// Your Data Here (2A).
 }
 
 // newLog returns log using the given storage. It recovers the log
@@ -81,7 +84,12 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
-	return 0
+	if len(l.entries) == 0 {
+		return 0
+	}
+
+	return uint64(len(l.entries) - 1)
+	// Your Code Here (2A).
 }
 
 // Term return the term of the entry in the given index

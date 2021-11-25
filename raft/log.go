@@ -59,7 +59,13 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
-	return nil
+	rl := &RaftLog{
+		storage: storage,
+		entries: make([]pb.Entry, 1),
+	}
+
+	return rl
+	// Your Code Here (2A).
 }
 
 // We need to compact the log entries in some point of time like
@@ -93,7 +99,13 @@ func (l *RaftLog) LastIndex() uint64 {
 }
 
 // Term return the term of the entry in the given index
+// Maybe should return an error when the expect entry does not exist.
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
+	if uint64(len(l.entries)) > i {
+		return l.entries[i].Term, nil
+	}
+
 	return 0, nil
+	// Your Code Here (2A).
 }

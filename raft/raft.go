@@ -191,6 +191,11 @@ func newRaft(c *Config) *Raft {
 	// Your Code Here (2A).
 }
 
+func (r *Raft) send(m pb.Message) {
+	m.From = r.id
+	r.msgs = append(r.msgs, m)
+}
+
 func (r *Raft) resetRandomizedElectionTimeout() {
 	r.randomizedElectionTimeout = r.electionTimeout + rand.Intn(r.electionTimeout)
 }
@@ -203,6 +208,7 @@ func (r *Raft) reset(term uint64) {
 
 	r.votes = map[uint64]bool{}
 	r.Lead = None
+	r.votes = make(map[uint64]bool)
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
@@ -210,9 +216,38 @@ func (r *Raft) reset(term uint64) {
 // (blocking op?)
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
+	pr := r.Prs[to]
 
+	msg := pb.Message{
+		MsgType: pb.MessageType_MsgAppend,
+		To:      to,
+		Term:    r.Term,
+
+		Entries: r.RaftLog.entries[pr.Next:]...,
+	}
+
+	return true
 	// Your Code Here (2A).
-	return false
+}
+
+func (r *Raft) bcastAppend() {
+	for _, peer := range r.Peers {
+		if peer == r.id {
+			continue
+		}
+		r.sendAppend(peer)
+	}
+}
+
+func (r *Raft) appendEntry(es ...pb.Entry) bool {
+	cur := r.RaftLog.LastIndex()
+	for i := range es {
+		es[i].Term = r.Term
+		es[i].Index = cur + 1 + i
+	}
+
+	r.RaftLog.entries = append(r.RaftLog.entries, es...)
+	return true
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
@@ -225,8 +260,17 @@ func (r *Raft) sendHeartbeat(to uint64) {
 		Term:    r.Term,
 	}
 
-	r.msgs = append(r.msgs, msg)
+	r.send(msg)
 	// Your Code Here (2A).
+}
+
+func (r *Raft) bcastHeartbeat() {
+	for _, peer := range r.Peers {
+		if peer == r.id {
+			continue
+		}
+		r.sendHeartbeat(peer)
+	}
 }
 
 // tick advances the internal logical clock by a single tick.
@@ -236,23 +280,15 @@ func (r *Raft) tick() {
 	case StateLeader:
 		r.heartbeatElapsed++
 		if r.heartbeatElapsed >= r.heartbeatTimeout {
-			for _, peerId := range r.Peers {
-				if peerId != r.id {
-					r.sendHeartbeat(peerId)
-				}
-			}
 			r.heartbeatElapsed = 0
+			r.Step(pb.Message{From: r.id, MsgType: pb.MessageType_MsgBeat})
 		}
 	default:
 		r.electionElapsed++
 		if r.electionElapsed >= r.electionTimeout {
 			// r.becomeCandidate()
-			msg := pb.Message{
-				MsgType: pb.MessageType_MsgHup,
-				Term:    r.Term,
-			}
-
-			r.Step(msg)
+			r.electionElapsed = 0
+			r.Step(pb.Message{From: r.id, MsgType: pb.MessageType_MsgHup})
 		}
 	}
 	// Your Code Here (2A).
@@ -271,13 +307,52 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
+	r.reset(r.Term + 1)
 	r.State = StateCandidate
 	r.Vote = r.id
-	r.votes = make(map[uint64]bool)
 	r.votes[r.Vote] = true
-	r.Term++
-	r.electionElapsed = 0
+	fmt.Printf("Raft[%d] has become candidate.", r.id)
+	// Your Code Here (2A).
+}
 
+// becomeLeader transform this peer's state to leader
+func (r *Raft) becomeLeader() {
+	// Your Code Here (2A).
+	r.reset(r.Term)
+	r.State = StateLeader
+	r.Lead = r.id
+
+	lastIndex := r.RaftLog.LastIndex() + 1
+	for _, pr := range r.Prs {
+		pr.Match = 0
+		pr.Next = lastIndex
+	}
+
+	emptyEnt := pb.Entry{Data: nil}
+	r.appendEntry(emptyEnt)
+	r.bcastAppend()
+
+	fmt.Printf("Raft[%d] has become leader.", r.id)
+	// NOTE: Leader should propose a noop entry on its term
+	// Your Code Here (2A).
+}
+
+func (r *Raft) checkCandidateUpToDate(term, index uint64) bool {
+	if len(r.RaftLog.entries) == 0 {
+		return true
+	}
+
+	lastEntry := r.RaftLog.entries[r.RaftLog.lastEntryIndex]
+
+	if lastEntry.Term != term {
+		return term > lastEntry.Term
+	}
+
+	return index > lastEntry.Index
+}
+
+func (r *Raft) hup() {
+	r.becomeCandidate()
 	for _, peer := range r.Peers {
 		msg := pb.Message{
 			From: r.id,
@@ -299,37 +374,6 @@ func (r *Raft) becomeCandidate() {
 			r.msgs = append(r.msgs, msg)
 		}
 	}
-
-	// Your Code Here (2A).
-}
-
-// becomeLeader transform this peer's state to leader
-func (r *Raft) becomeLeader() {
-	// Your Code Here (2A).
-	r.State = StateLeader
-	for _, peerId := range r.Peers {
-		if peerId != r.id {
-			r.sendHeartbeat(peerId)
-		}
-	}
-	r.heartbeatElapsed = 0
-
-	// NOTE: Leader should propose a noop entry on its term
-	// Your Code Here (2A).
-}
-
-func (r *Raft) checkCandidateUpToDate(term, index uint64) bool {
-	if len(r.RaftLog.entries) == 0 {
-		return true
-	}
-
-	lastEntry := r.RaftLog.entries[r.RaftLog.lastEntryIndex]
-
-	if lastEntry.Term != term {
-		return term > lastEntry.Term
-	}
-
-	return index > lastEntry.Index
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -337,7 +381,7 @@ func (r *Raft) checkCandidateUpToDate(term, index uint64) bool {
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
 	switch {
-	case m.Term == 0:
+	case m.Term == None:
 		// send by myself
 	case m.Term > r.Term:
 		switch m.MsgType {
@@ -400,7 +444,9 @@ func (r *Raft) Step(m pb.Message) error {
 	case pb.MessageType_MsgAppendResponse:
 		fmt.Printf("Received append response from raft peer[%d]\n", m.From)
 	case pb.MessageType_MsgHup:
-		r.becomeCandidate()
+		r.hup()
+	case pb.MessageType_MsgBeat:
+		r.bcastHeartbeat()
 	}
 	// switch r.State {
 	// case StateFollower:
